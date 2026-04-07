@@ -1,107 +1,167 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { pusherClient } from "@/lib/pusher";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import ChatContainer from "@/components/chat/chat-container";
+import AuthForm from "@/components/auth/auth-form";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, User } from "lucide-react";
+import { LogOut, MessageCircle, Users, Plus } from "lucide-react";
+import { ConversationList } from "@/components/chat/conversation-list";
+import { UserSearch } from "@/components/chat/user-search";
+import { startTransition } from "react";
 
-interface Message {
-  _id?: string;
-  text: string;
-  user: string;
-  createdAt?: string;
-}
-
-export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [username] = useState(`User_${Math.floor(Math.random() * 1000)}`); // Giả lập user
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // 1. Load tin nhắn cũ từ MongoDB
-  useEffect(() => {
-    fetch("/api/messages")
-      .then((res) => res.json())
-      .then((data) => setMessages(data));
-
-    // 2. Lắng nghe Pusher real-time
-    const channel = pusherClient.subscribe("chat-room");
-    channel.bind("new-message", (data: Message) => {
-      setMessages((prev) => [...prev, data]);
-    });
-
-    return () => {
-      pusherClient.unsubscribe("chat-room");
-    };
-  }, []);
-
-  // Cuộn xuống cuối khi có tin mới
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo(0, scrollRef.current.scrollHeight);
+export default function HomePage() {
+  const router = useRouter();
+  // Khởi tạo user từ localStorage ngay lập tức
+  const [user, setUser] = useState<any>(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("chat-user");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (!parsed.isAdmin) return parsed;
+        } catch (e) {}
+      }
     }
-  }, [messages]);
+    return null;
+  });
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
+  const [loading, setLoading] = useState(true);
+  const [selectedRoomId, setSelectedRoomId] = useState<string>("");
+  const [selectedOtherUser, setSelectedOtherUser] = useState<any>(null);
+  const [showSearch, setShowSearch] = useState(false);
 
-    const tempInput = input;
-    setInput("");
+  // Effect chỉ để kiểm tra admin và chuyển hướng
+  useEffect(() => {
+    const stored = localStorage.getItem("chat-user");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed.isAdmin) {
+          router.push("/admin");
+          return;
+        }
+      } catch (e) {}
+    }
+    setTimeout(() => setLoading(false), 0);
+  }, [router]);
 
-    await fetch("/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: tempInput, user: username }),
-    });
+  const logout = () => {
+    localStorage.removeItem("chat-user");
+    setUser(null);
+    router.refresh();
   };
 
+  const handleSelectRoom = (roomId: string, otherUser: any) => {
+    setSelectedRoomId(roomId);
+    setSelectedOtherUser(otherUser);
+    setShowSearch(false);
+  };
+
+  const handleStartChat = (roomId: string, targetUser: any) => {
+    setSelectedRoomId(roomId);
+    setSelectedOtherUser(targetUser);
+    setShowSearch(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="italic text-gray-500 animate-pulse">Đang chuẩn bị...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4 gap-8">
+        <div className="flex flex-col items-center text-center space-y-3">
+          <div className="p-4 bg-blue-600 rounded-2xl shadow-lg shadow-blue-200">
+            <MessageCircle className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-4xl font-black tracking-tight text-slate-900">Spackie Chat</h1>
+          <p className="text-slate-500 max-w-[280px]">Nhắn tin riêng tư với bạn bè và đội ngũ hỗ trợ.</p>
+        </div>
+        <div className="w-full max-w-md">
+          <AuthForm
+            onAuth={(u: any) => {
+              localStorage.setItem("chat-user", JSON.stringify(u));
+              if (u.isAdmin) router.push("/admin");
+              else setUser(u);
+            }}
+          />
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
-      <Card className="w-full max-w-md h-[600px] flex flex-col shadow-xl">
-        <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2 text-primary">
-            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
-            Live Chat
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">Logged in as: {username}</p>
-        </CardHeader>
-
-        <CardContent className="flex-1 overflow-hidden p-0">
-          <ScrollArea ref={scrollRef} className="h-full p-4">
-            <div className="space-y-4">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex flex-col ${msg.user === username ? "items-end" : "items-start"}`}>
-                  <div
-                    className={`max-w-[80%] rounded-lg p-3 text-sm ${
-                      msg.user === username ? "bg-primary text-primary-foreground" : "bg-muted"
-                    }`}>
-                    <p className="font-bold text-[10px] mb-1 opacity-70">{msg.user}</p>
-                    {msg.text}
-                  </div>
-                </div>
-              ))}
+    <main className="h-screen bg-slate-100 flex flex-col p-0 sm:p-4">
+      <div className="flex-1 flex flex-col sm:flex-row gap-4 overflow-hidden">
+        {/* Sidebar */}
+        <aside className="w-full sm:w-80 bg-white rounded-2xl shadow-xl border flex flex-col overflow-hidden">
+          <div className="p-4 border-b flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                {user.username[0].toUpperCase()}
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Xin chào,</p>
+                <p className="font-bold text-slate-900 leading-tight">{user.username}</p>
+              </div>
             </div>
-          </ScrollArea>
-        </CardContent>
-
-        <CardFooter className="p-4 border-t">
-          <form onSubmit={handleSend} className="flex w-full items-center space-x-2">
-            <Input
-              placeholder="Type your message..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              className="flex-1"
-            />
-            <Button type="submit" size="icon">
-              <Send className="h-4 w-4" />
+            <Button variant="ghost" size="icon" onClick={logout} className="text-slate-400 hover:text-red-500">
+              <LogOut className="w-5 h-5" />
             </Button>
-          </form>
-        </CardFooter>
-      </Card>
-    </div>
+          </div>
+          <div className="p-2 border-b">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2 text-slate-600"
+              onClick={() => setShowSearch(!showSearch)}>
+              <Plus className="w-4 h-4" />
+              {showSearch ? "Đóng tìm kiếm" : "Chat mới"}
+            </Button>
+            {showSearch && (
+              <div className="mt-2">
+                <UserSearch
+                  onStartChat={handleStartChat}
+                  currentUserId={user._id} // ← ĐÃ THÊM
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex-1 overflow-auto">
+            <ConversationList userId={user._id} onSelectRoom={handleSelectRoom} />
+          </div>
+        </aside>
+
+        {/* Chat area */}
+        <div className="flex-1 bg-white rounded-2xl shadow-xl border flex flex-col overflow-hidden">
+          {!selectedRoomId ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-300 gap-3">
+              <Users className="w-16 h-16" />
+              <p className="text-sm">Chọn một cuộc trò chuyện hoặc bắt đầu chat mới</p>
+            </div>
+          ) : (
+            <>
+              <div className="p-4 border-b bg-white flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                  {selectedOtherUser?.username?.[0]?.toUpperCase() || "?"}
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Đang trò chuyện với</p>
+                  <p className="font-bold text-slate-900">{selectedOtherUser?.username || "Người dùng"}</p>
+                </div>
+              </div>
+              <div className="flex-1 overflow-hidden bg-slate-50">
+                <ChatContainer user={user} roomId={selectedRoomId} />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
