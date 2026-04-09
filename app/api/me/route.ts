@@ -8,7 +8,9 @@ export async function GET() {
   try {
     await connectDB();
     const cookieStore = await cookies();
-    const userId = cookieStore.get("auth_session")?.value; // Kiểm tra lại tên cookie bạn đặt khi login
+
+    // Check for both regular auth_session cookies
+    const userId = cookieStore.get("auth_session")?.value;
 
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

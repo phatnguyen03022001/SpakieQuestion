@@ -1,361 +1,115 @@
-# globals.css — Design Guideline (Project Usage)
+# Thiết kế hệ thống - Shadcn/UI Design System
 
-Tài liệu này mô tả cách sử dụng `app/globals.css` để đảm bảo **design system thống nhất** cho toàn bộ project chat (Next.js App Router + Tailwind + shadcn structure).
+## 1. Triết lý thiết kế: "Shadcn/UI Design System"
 
----
+Hệ thống sử dụng thiết kế theo phong cách shadcn/ui (ui.shadcn.com) với hệ thống component nhất quán, spacing có hệ thống, và bảng màu đa dạng nhưng vẫn đảm bảo tính tương phản cao.
 
-## 1. Vai trò của `globals.css`
+**Nguyên tắc cốt lõi:**
 
-`globals.css` là **design foundation layer** của project:
+- **Nhất quán (Consistency):** Sử dụng hệ thống design tokens và component library của shadcn/ui để đảm bảo trải nghiệm người dùng đồng nhất.
+- **Tương phản cao (High Contrast):** Đảm bảo văn bản sắc nét, dễ đọc ở cả hai chế độ Light và Dark, đạt tiêu chuẩn WCAG AA.
+- **Cấu trúc rõ ràng (Structural Clarity):** Sử dụng border, shadow, và spacing có hệ thống để phân cấp thông tin và tạo chiều sâu cho giao diện.
+- **Tính tiếp cận (Accessibility):** Ưu tiên thiết kế có thể tiếp cận với đầy đủ các trạng thái focus, hover, active.
 
-* Khai báo **design tokens** (color, radius, semantic colors)
-* Định nghĩa **dark mode**
-* Mapping token → Tailwind utilities
-* Tạo **UI utilities dùng chung**
-* Chuẩn hóa base style toàn app
+## 2. Chiến lược Mobile First & iOS Optimization
 
-Không viết style component-specific tại đây.
+Để đảm bảo ứng dụng hoạt động mượt mà trên iPhone và vượt qua các giới hạn của Safari:
 
----
+### 2.1. Giải pháp cho Safari Search Bar
 
-## 2. Kiến trúc Design System
+Safari thường thay đổi kích thước viewport khi thanh địa chỉ hiện/ẩn. Chúng ta xử lý bằng:
 
-```
-Design Token (CSS Variables)
-        ↓
-Tailwind Theme Mapping
-        ↓
-Utility Classes
-        ↓
-Components (components/*)
-        ↓
-Pages (app/*)
-```
+- **Dynamic Units:** Sử dụng `height: 100dvh` thay vì `100vh` để container luôn khớp với không gian hiển thị thực tế.
+- **Safe Area:** Sử dụng `env(safe-area-inset-bottom)` cho phần Chat Input để không bị che bởi thanh điều hướng hệ thống của iOS.
 
----
+### 2.2. Ngăn chặn Auto-Zoom
 
-## 3. Design Tokens (CSS Variables)
+- **Typography:** Toàn bộ input và textarea phải có `font-size` tối thiểu `16px`. Điều này ngăn Safari tự động phóng to màn hình khi người dùng chạm vào ô nhập liệu.
 
-### 3.1 Core Tokens
+### 2.3. Touch & Gestures
 
-Định nghĩa trong `:root`
+- **Touch Targets:** Các nút chức năng (gửi, xóa, upload) có kích thước vùng chạm tối thiểu `44x44px`.
+- **Bouncing Effect:** Vô hiệu hóa `overscroll-behavior` trên body để ngăn hiệu ứng "cuộn nẩy" toàn trang, giữ cảm giác chắc chắn như app Native.
 
-```css
-:root {
-  --background
-  --foreground
-  --primary
-  --secondary
-  --muted
-  --accent
-  --destructive
-  --border
-}
-```
+## 3. Hệ màu (Color Palette) - Shadcn/UI Style
 
-👉 Đây là **semantic tokens**, không phải màu cố định.
+### Chủ đạo (Core) - Đảm bảo tương phản WCAG AA
 
-Không dùng:
+| Mode  | Background              | Foreground                | Primary (Brand)                        | Secondary                    |
+| ----- | ----------------------- | ------------------------- | -------------------------------------- | ---------------------------- |
+| Light | `oklch(1 0 0)` (Trắng)  | `oklch(0.15 0 0)` (Đen)   | `oklch(0.6 0.2 250)` (Xanh dương)      | `oklch(0.97 0 0)` (Xám nhạt) |
+| Dark  | `oklch(0.15 0 0)` (Đen) | `oklch(0.98 0 0)` (Trắng) | `oklch(0.7 0.2 250)` (Xanh dương sáng) | `oklch(0.25 0 0)` (Xám đậm)  |
 
-```tsx
-className="bg-blue-500"
-```
+### Trạng thái đặc thù (Semantic) - Shadcn/UI Style
 
-Luôn dùng:
+Sử dụng màu chuẩn shadcn/ui để giữ tính rõ ràng cho hành động:
 
-```tsx
-className="bg-primary"
-```
+- **Success:** `oklch(0.62 0.19 149)` (Xanh lá - Online/Thành công)
+- **Warning:** `oklch(0.8 0.18 75)` (Vàng cam - Cảnh báo)
+- **Destructive:** `oklch(0.58 0.22 25)` (Đỏ - Xóa/Lỗi)
+- **Muted:** `oklch(0.97 0 0)` (Light) / `oklch(0.25 0 0)` (Dark) - Cho text phụ
+- **Accent:** `oklch(0.95 0.05 250)` (Light) / `oklch(0.3 0.05 250)` (Dark) - Cho hover states
 
----
+### Border & Input
+- **Border:** `oklch(0.92 0 0)` (Light) / `oklch(0.3 0 0)` (Dark)
+- **Input:** `oklch(0.98 0 0)` (Light) / `oklch(0.2 0 0)` (Dark)
+- **Ring:** Màu primary với opacity 50% cho focus states
 
-### 3.2 Semantic Extension
+## 4. Thành phần giao diện (UI Components) - Shadcn/UI Style
 
-Project bổ sung:
+### Chat Bubbles
+- **Tin nhắn gửi đi:** Bo góc medium (0.5rem), background primary, text primary-foreground, shadow-sm.
+- **Tin nhắn nhận về:** Bo góc medium (0.5rem), background secondary, text secondary-foreground, shadow-sm.
+- **Feedback:** Hiệu ứng `hover:scale-[1.02]` và `active:scale-[0.98]` với transition-all.
 
-```css
---success
---warning
-```
+### Cards & Containers
+- **Card:** Background card, border border, rounded-lg (0.5rem), shadow-sm.
+- **Header:** Background background/95 với backdrop-blur, border-b border-border.
+- **Input Fields:** Rounded-md (0.375rem), border border-input, focus:ring-2 focus:ring-ring.
 
-Dùng cho:
+### Buttons
+- **Primary:** bg-primary text-primary-foreground hover:bg-primary/90
+- **Secondary:** bg-secondary text-secondary-foreground hover:bg-secondary/80
+- **Outline:** border border-input bg-background hover:bg-accent hover:text-accent-foreground
+- **Ghost:** hover:bg-accent hover:text-accent-foreground
+- **Destructive:** bg-destructive text-destructive-foreground hover:bg-destructive/90
 
-* trạng thái user online
-* message status
-* badge
-* notification
+### Hình ảnh "Once" (Xem một lần)
+- **Chưa mở:** Card với blur effect, border border, và icon Eye-off.
+- **Đang mở:** Modal fullscreen với backdrop-blur-md, nền background/95.
 
-Ví dụ:
+## 5. Spacing & Typography System
 
-```tsx
-className="bg-success text-white"
-```
+### Border Radius
+- `--radius-sm`: 0.25rem (4px)
+- `--radius-md`: 0.375rem (6px)
+- `--radius-lg`: 0.5rem (8px)
+- `--radius-xl`: 0.75rem (12px)
 
----
+### Spacing Scale (Tailwind)
+- Sử dụng spacing scale của Tailwind: 0.25rem (4px) increments
+- Container padding: 1rem (16px) trên mobile, 1.5rem (24px) trên desktop
 
-## 4. Tailwind Theme Mapping
+### Typography
+- **Font Family:** Inter hoặc system font stack
+- **Font Sizes:** Sử dụng scale: xs (0.75rem), sm (0.875rem), base (1rem), lg (1.125rem), xl (1.25rem)
+- **Font Weights:** 400 (normal), 500 (medium), 600 (semibold), 700 (bold)
 
-Block:
+## 6. Trải nghiệm người dùng (UX Patterns)
 
-```css
-@theme inline {
-  --color-background: var(--background);
-}
-```
+- **Trạng thái kết nối:** Badge với màu success cho online, outline cho offline.
+- **Chuyển cảnh:** Sử dụng CSS transitions với duration-200 cho các state changes.
+- **Loading:** Sử dụng Skeleton components của shadcn/ui với animation pulse.
+- **Empty States:** Card với icon và text descriptive, background muted.
 
-### Mục đích
+## 7. Lưu ý cho Nhà phát triển
 
-Cho phép Tailwind hiểu CSS variables:
-
-| CSS variable   | Tailwind class    |
-| -------------- | ----------------- |
-| `--background` | `bg-background`   |
-| `--foreground` | `text-foreground` |
-| `--primary`    | `bg-primary`      |
-| `--border`     | `border-border`   |
+- **CSS Variables:** Luôn sử dụng biến đã định nghĩa trong `globals.css`. Không hard-code mã màu.
+- **Component Library:** Sử dụng components từ `/components/ui` thay vì tự tạo styles từ đầu.
+- **Dark Mode:** Luôn test cả hai chế độ Light và Dark, đảm bảo tương phản đạt chuẩn.
+- **Layout:** Sử dụng flexbox và grid system của Tailwind để responsive design.
+- **Performance:** Tối ưu hóa ảnh qua Cloudinary trước khi hiển thị trên mobile để tiết kiệm băng thông.
 
 ---
 
-## 5. Dark Mode System
-
-Dark mode hoạt động qua class:
-
-```html
-<html class="dark">
-```
-
-Variant:
-
-```css
-@custom-variant dark (&:is(.dark *));
-```
-
-### Cách dùng
-
-```tsx
-<div className="bg-background">
-```
-
-→ tự đổi màu khi `.dark` active.
-
-Không viết:
-
-```tsx
-dark:bg-black
-```
-
-(trừ khi override đặc biệt)
-
----
-
-## 6. Base Layer
-
-```css
-@layer base
-```
-
-Áp dụng global normalization:
-
-```css
-* {
-  @apply border-border outline-ring/50;
-}
-```
-
-Ý nghĩa:
-
-* mọi border đồng nhất
-* focus ring consistent
-
-Body:
-
-```css
-body {
-  @apply bg-background text-foreground antialiased;
-}
-```
-
-→ toàn app tự sync theme.
-
----
-
-## 7. Utility Layer (Quan trọng cho Chat App)
-
-### 7.1 Chat Bubble System
-
-#### Sent Message
-
-```css
-.chat-bubble-sent
-```
-
-Dùng trong:
-
-```
-components/chat/message-item.tsx
-```
-
-```tsx
-<div className="chat-bubble-sent">
-```
-
-Style:
-
-* primary background
-* góc phải vuông
-* auto dark-mode
-
----
-
-#### Received Message
-
-```css
-.chat-bubble-received
-```
-
-```tsx
-<div className="chat-bubble-received">
-```
-
----
-
-### 7.2 Scrollbar chuẩn Chat
-
-```css
-.custom-scrollbar
-```
-
-Dùng cho:
-
-* message list
-* conversation list
-
-```tsx
-<ScrollArea className="custom-scrollbar">
-```
-
----
-
-## 8. Quy tắc sử dụng trong Project Structure
-
-### ✅ components/ui/*
-
-Chỉ dùng token:
-
-```tsx
-bg-card
-text-card-foreground
-border-border
-```
-
-Không hardcode màu.
-
----
-
-### ✅ components/chat/*
-
-Được phép dùng utilities custom:
-
-```
-chat-bubble-*
-custom-scrollbar
-```
-
----
-
-### ✅ app/*
-
-Không style trực tiếp.
-
-Page chỉ layout:
-
-```tsx
-<ChatContainer />
-```
-
----
-
-## 9. Khi cần thêm màu mới
-
-### Bước 1 — thêm token
-
-```css
-:root {
-  --info: oklch(...);
-}
-```
-
-### Bước 2 — map vào theme
-
-```css
-@theme inline {
-  --color-info: var(--info);
-}
-```
-
-### Bước 3 — dùng
-
-```tsx
-bg-info text-info-foreground
-```
-
----
-
-## 10. Quy tắc bắt buộc (Project Convention)
-
-### ✔ ALWAYS
-
-* dùng semantic colors
-* dùng token thay vì màu raw
-* reuse utilities
-* design qua globals trước, component sau
-
-### ❌ NEVER
-
-* hex color trong component
-* inline style color
-* duplicate bubble style
-* tự tạo scrollbar riêng
-
----
-
-## 11. Mapping với Structure hiện tại
-
-| Folder            | Vai trò design     |
-| ----------------- | ------------------ |
-| `app/`            | layout + routing   |
-| `components/ui`   | primitive UI       |
-| `components/chat` | feature UI         |
-| `globals.css`     | design system core |
-| `lib/utils.ts`    | class merge (`cn`) |
-
----
-
-## 12. Flow khi tạo UI mới
-
-```
-Need UI
-  ↓
-Có reusable không?
-  ↓ yes → dùng lại
-  ↓ no
-có pattern global?
-  ↓ yes → thêm globals.css utility
-  ↓ no → local component style
-```
-
----
-
-## 13. Tóm tắt
-
-`globals.css` trong project này đóng vai trò:
-
-* Design Token Source
-* Theme Engine
-* Dark Mode Controller
-* Shared Utilities Provider
-* Visual Consistency Layer
-
-Mọi UI nên phụ thuộc vào đây để tránh design drift khi project scale.
-
----
+*Tài liệu này định nghĩa các nguyên tắc thiết kế và hướng dẫn triển khai cho hệ thống chat với phong cách Shadcn/UI Design System.*

@@ -24,39 +24,30 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") || "20"), 50);
     const skip = (page - 1) * limit;
 
-    // Bước 1: Lấy danh sách roomId có phân trang (dùng $group + $sort + $skip/$limit)
-    const roomData = await Message.aggregate([
-      { $group: { _id: "$roomId" } },
-      { $sort: { _id: 1 } }, // sắp xếp theo roomId để nhất quán
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $project: {
-          roomId: "$_id",
-          userIds: {
-            $filter: {
-              input: { $split: ["$_id", "-"] },
-              as: "part",
-              cond: { $and: [{ $ne: ["$$part", "room"] }, { $ne: ["$$part", ""] }] },
-            },
-          },
-        },
-      },
-    ]);
+    // Lấy tất cả roomId duy nhất (dùng distinct + index)
+    const allRoomIds = await Message.distinct("roomId");
+    // Sắp xếp để phân trang nhất quán
+    allRoomIds.sort();
+    const totalRooms = allRoomIds.length;
+    const paginatedRoomIds = allRoomIds.slice(skip, skip + limit);
+    const hasMore = skip + paginatedRoomIds.length < totalRooms;
 
-    // Đếm tổng số phòng
-    const totalCountResult = await Message.aggregate([{ $group: { _id: "$roomId" } }, { $count: "total" }]);
-    const totalRooms = totalCountResult[0]?.total || 0;
-    const hasMore = skip + roomData.length < totalRooms;
-
-    if (roomData.length === 0) {
+    if (paginatedRoomIds.length === 0) {
       return NextResponse.json({ rooms: [], hasMore, nextPage: page + 1 });
     }
 
-    // Lấy tất cả userId hợp lệ
-    const allUserIds = roomData
-      .flatMap((room) => room.userIds)
-      .filter((id: string) => mongoose.Types.ObjectId.isValid(id));
+    // Parse participants từ mỗi roomId (dựa trên cấu trúc "userId1-userId2" hoặc "room-userId")
+    const roomData = paginatedRoomIds.map((roomId) => {
+      const parts = roomId.split("-");
+      const userIds = parts.filter(
+        (
+          part: string | Uint8Array<ArrayBufferLike> | mongoose.mongo.BSON.ObjectId | mongoose.mongo.BSON.ObjectIdLike,
+        ) => part !== "room" && part !== "" && mongoose.Types.ObjectId.isValid(part),
+      );
+      return { roomId, userIds };
+    });
+
+    const allUserIds = roomData.flatMap((room) => room.userIds);
     const uniqueUserIds = [...new Set(allUserIds)];
 
     const usersMap = new Map();
@@ -68,10 +59,7 @@ export async function GET(req: NextRequest) {
     const result = roomData
       .map((room) => ({
         roomId: room.roomId,
-        participants: room.userIds
-          .filter((id: string) => mongoose.Types.ObjectId.isValid(id))
-          .map((id: string) => usersMap.get(id))
-          .filter(Boolean),
+        participants: room.userIds.map((id: any) => usersMap.get(id)).filter(Boolean),
       }))
       .filter((room) => room.participants.length > 0);
 

@@ -1,99 +1,134 @@
+"use client";
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getPusherClient } from "@/lib/client";
 
 export function useChat(currentUser: any, roomId: string) {
+  /** 🔑 normalize primitive deps */
+  const userId = currentUser?._id ?? null;
+  const isAdmin = currentUser?.isAdmin ?? false;
+
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+
+  /** refs */
   const loadingMoreRef = useRef(false);
-  const messagesRef = useRef(messages); // để dùng trong event handlers mà không cần dependency
+  const hasMoreRef = useRef(true);
+  const isAdminRef = useRef(isAdmin);
 
   useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
 
+  useEffect(() => {
+    isAdminRef.current = isAdmin;
+  }, [isAdmin]);
+
+  /** ---------------- LOAD MESSAGES ---------------- */
   const loadMessages = useCallback(
     async (cursor?: string | null, isLoadMore = false) => {
-      if (!currentUser?._id || !roomId) return;
-      if (isLoadMore && (loadingMoreRef.current || !hasMore)) return;
+      if (!userId || !roomId) return;
+
+      if (isLoadMore && (loadingMoreRef.current || !hasMoreRef.current)) return;
 
       const setter = isLoadMore ? setLoadingMore : setLoading;
-      if (isLoadMore) loadingMoreRef.current = true;
-      setter(true);
 
       try {
-        const url = `/api/messages?roomId=${roomId}&isAdmin=${currentUser.isAdmin}&limit=10${cursor ? `&cursor=${cursor}` : ""}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error();
+        if (isLoadMore) loadingMoreRef.current = true;
+        setter(true);
+
+        const res = await fetch(`/api/messages?roomId=${roomId}&cursor=${cursor || ""}&limit=15`);
+
+        if (!res.ok) throw new Error("fetch failed");
+
         const data = await res.json();
 
-        if (isLoadMore) {
-          // Lọc trùng lặp dựa trên _id
-          setMessages((prev) => {
-            const existingIds = new Set(prev.map((m) => m._id));
-            const newMessages = data.messages.filter((m: any) => !existingIds.has(m._id));
-            return [...newMessages, ...prev];
-          });
-        } else {
-          setMessages(data.messages || []);
-        }
-        setHasMore(data.hasMore ?? false);
+        setMessages((prev) => {
+          if (!isLoadMore) return data.messages || [];
+
+          const existingIds = new Set(prev.map((m) => m._id));
+          const newMessages = (data.messages || []).filter((m: any) => !existingIds.has(m._id));
+          return [...newMessages, ...prev];
+        });
+
+        setHasMore(Boolean(data.hasMore));
         setNextCursor(data.nextCursor ?? null);
-      } catch {
+      } catch (err) {
+        console.error("Load messages failed", err);
         if (!isLoadMore) setMessages([]);
       } finally {
         setter(false);
         if (isLoadMore) loadingMoreRef.current = false;
       }
     },
-    [currentUser?._id, currentUser?.isAdmin, roomId, hasMore],
+    [userId, roomId],
   );
 
-  // Load lần đầu
+  /** ---------------- ROOM CHANGE ---------------- */
   useEffect(() => {
-    loadMessages();
-  }, [roomId]); // chỉ load lại khi roomId thay đổi
+    if (!roomId || !userId) return;
 
-  // Pusher events
+    setMessages([]);
+    setHasMore(true);
+    setNextCursor(null);
+
+    loadMessages();
+  }, [roomId, userId, loadMessages]);
+
+  /** ---------------- MARK SEEN ON ROOM OPEN ---------------- */
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !userId) return;
+
+    const markSeen = async () => {
+      try {
+        await fetch("/api/messages/seen", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomId }),
+        });
+      } catch (err) {
+        console.error("Failed to mark seen", err);
+      }
+    };
+
+    markSeen();
+  }, [roomId, userId]);
+
+  /** ---------------- PUSHER ---------------- */
+  useEffect(() => {
+    if (!roomId || !userId) return;
+
     const pusher = getPusherClient();
     const channel = pusher.subscribe(`chat-${roomId}`);
 
-    const handleNewMessage = (data: any) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m._id === data._id)) return prev;
-        return [...prev, data];
-      });
+    const handleNewMessage = (msg: any) => {
+      setMessages((prev) => (prev.some((m) => m._id === msg._id) ? prev : [...prev, msg]));
     };
 
-    const handleMessageDeleted = (data: { messageId: string }) => {
+    const handleMessageDeleted = ({ messageId }: { messageId: string }) => {
       setMessages((prev) =>
         prev.map((msg) => {
-          if (msg._id !== data.messageId) return msg;
-          // Nếu là admin, giữ nguyên nội dung gốc nhưng đánh dấu deleted
-          if (currentUser?.isAdmin) {
-            return { ...msg, deleted: true };
-          }
-          // Người thường: xóa nội dung
-          return {
-            ...msg,
-            deleted: true,
-            text: "[Tin nhắn đã bị gỡ]",
-            imageUrl: null,
-          };
+          if (msg._id !== messageId) return msg;
+
+          return isAdminRef.current ? { ...msg, deleted: true } : { ...msg, deleted: true, text: null, imageUrl: null };
         }),
       );
     };
 
-    const handleMessagesSeen = (data: { roomId: string; userId: string }) => {
+    const handleMessagesSeen = (data: { userId: string; isAdmin: boolean }) => {
+      if (data.isAdmin) return;
+
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.userId === data.userId) return msg;
-          if (msg.seenBy?.includes(data.userId)) return msg;
-          return { ...msg, seenBy: [...(msg.seenBy || []), data.userId] };
+
+          const seen = msg.seenBy || [];
+          if (seen.includes(data.userId)) return msg;
+
+          return { ...msg, seenBy: [...seen, data.userId] };
         }),
       );
     };
@@ -103,17 +138,23 @@ export function useChat(currentUser: any, roomId: string) {
     channel.bind("messages-seen", handleMessagesSeen);
 
     return () => {
-      channel.unbind("new-message", handleNewMessage);
-      channel.unbind("message-deleted", handleMessageDeleted);
-      channel.unbind("messages-seen", handleMessagesSeen);
+      channel.unbind_all();
       pusher.unsubscribe(`chat-${roomId}`);
     };
-  }, [roomId, currentUser?.isAdmin]);
+  }, [roomId, userId]);
 
+  /** ---------------- LOAD MORE ---------------- */
   const loadMoreOlder = useCallback(async () => {
-    if (!hasMore || loadingMoreRef.current || !nextCursor) return;
+    if (!nextCursor || loadingMoreRef.current || !hasMoreRef.current) return;
     await loadMessages(nextCursor, true);
-  }, [hasMore, nextCursor, loadMessages]);
+  }, [nextCursor, loadMessages]);
 
-  return { messages, loading, loadingMore, hasMore, loadMoreOlder, setMessages };
+  return {
+    messages,
+    loading,
+    loadingMore,
+    hasMore,
+    loadMoreOlder,
+    setMessages,
+  };
 }

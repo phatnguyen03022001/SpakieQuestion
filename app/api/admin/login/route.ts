@@ -21,8 +21,8 @@ export async function POST(req: Request) {
   }
 
   const cookieStore = await cookies();
-  // Vẫn cấp cookie admin_session bình thường
-  cookieStore.set("admin_session", user._id.toString(), {
+  // Vẫn cấp cookie auth_session bình thường
+  cookieStore.set("auth_session", user._id.toString(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",

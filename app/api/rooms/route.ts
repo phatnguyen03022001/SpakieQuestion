@@ -11,14 +11,16 @@ export async function GET(req: NextRequest) {
   const userId = cookieStore.get("auth_session")?.value;
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Phân trang
+  // Escape userId để tránh lỗi regex
+  const escapedUserId = userId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const roomIdPattern = `(^|-)${escapedUserId}(-|$)`;
+
   const page = parseInt(req.nextUrl.searchParams.get("page") || "1");
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") || "20"), 50);
   const skip = (page - 1) * limit;
 
-  // Lấy tất cả roomId có chứa userId (dùng regex) + phân trang
   const rooms = await Message.aggregate([
-    { $match: { roomId: { $regex: userId } } },
+    { $match: { roomId: { $regex: roomIdPattern, $options: "" } } },
     { $group: { _id: "$roomId", lastMessageAt: { $max: "$createdAt" } } },
     { $sort: { lastMessageAt: -1 } },
     { $skip: skip },
@@ -26,9 +28,8 @@ export async function GET(req: NextRequest) {
     { $project: { roomId: "$_id", _id: 0, lastMessageAt: 1 } },
   ]);
 
-  // Đếm tổng số phòng để biết có more
   const totalCountResult = await Message.aggregate([
-    { $match: { roomId: { $regex: userId } } },
+    { $match: { roomId: { $regex: roomIdPattern, $options: "" } } },
     { $group: { _id: "$roomId" } },
     { $count: "total" },
   ]);
@@ -39,21 +40,35 @@ export async function GET(req: NextRequest) {
   for (const room of rooms) {
     const { roomId, lastMessageAt } = room;
     const parts = roomId.split("-");
+    // Tìm userId còn lại (khác userId hiện tại và khác "room")
     const otherUserId = parts.find((id: string) => id !== userId && id !== "room");
-    if (otherUserId && mongoose.Types.ObjectId.isValid(otherUserId)) {
-      const otherUser = await User.findById(otherUserId).select("username");
-      result.push({
-        roomId,
-        otherUser: { _id: otherUserId, username: otherUser?.username || "Unknown" },
-        lastMessageAt,
-      });
-    } else {
-      result.push({
-        roomId,
-        otherUser: { _id: null, username: "Admin/Support" },
-        lastMessageAt,
-      });
+
+    // Nếu không tìm thấy otherUserId (ví dụ room chỉ có mình user) thì bỏ qua
+    if (!otherUserId || !mongoose.Types.ObjectId.isValid(otherUserId)) {
+      continue;
     }
+
+    const otherUser = await User.findById(otherUserId).select("username isAdmin");
+
+    // Nếu không tìm thấy user hoặc user đó là admin → bỏ qua (không hiển thị phòng này)
+    if (!otherUser || otherUser.isAdmin) {
+      continue;
+    }
+
+    const unreadCount = await Message.countDocuments({
+      roomId: room.roomId,
+      seenBy: { $ne: userId },
+      userId: { $ne: userId },
+    });
+
+    // Chỉ thêm phòng nếu otherUser là user thường (non-admin)
+    result.push({
+      roomId,
+      otherUser: { _id: otherUserId, username: otherUser.username },
+      lastMessageAt,
+      unreadCount,
+    });
   }
+
   return NextResponse.json({ rooms: result, hasMore, nextPage: page + 1 });
 }

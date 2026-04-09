@@ -22,7 +22,7 @@ export default function NotFound() {
       </div>
 
       <Link href="/">
-        <Button className="rounded-full px-8 font-bold uppercase text-[11px] tracking-widest shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all">
+        <Button className="rounded-full px-8 font-bold uppercase text-[11px] tracking-widest transition-all">
           <MoveLeft className="mr-2 w-4 h-4" /> Quay về trang chủ
         </Button>
       </Link>

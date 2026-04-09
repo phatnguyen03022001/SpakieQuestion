@@ -1,154 +1,214 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import MessageItem from "./message-item";
 import ChatInput from "./chat-input";
-import { Loader2, ArrowUp } from "lucide-react";
-import { useChat } from "@/hooks/use-chat";
+import { Loader2, ChevronDown, ChevronLeft, History, Info, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getPusherClient } from "@/lib/client";
 import { cn } from "@/lib/utils";
+import { useHeartbeat } from "../../hooks/useHeartbeat";
 
 interface ChatContainerProps {
-  user: { _id: string; username: string; isAdmin: boolean };
+  currentUser: { _id: string; username: string; isAdmin: boolean };
+  targetUser: { _id: string; username: string };
   roomId: string;
   readOnly?: boolean;
+  messages: any[];
+  setMessages: React.Dispatch<React.SetStateAction<any[]>>;
+  loadMoreOlder: () => Promise<void>;
+  hasMore: boolean;
+  loading?: boolean;
+  loadingMore?: boolean;
+  onBack?: () => void;
 }
 
-const MAX_MESSAGE_LENGTH = 160;
-
-export default function ChatContainer({ user, roomId, readOnly = false }: ChatContainerProps) {
-  const { messages, loading, loadingMore, hasMore, loadMoreOlder, setMessages } = useChat(user, roomId);
-
-  // ✅ chặn message quá dài ngay tại container
-  const safeMessages = messages.filter((m) => !m.content || m.content.length <= MAX_MESSAGE_LENGTH);
-
+export default function ChatContainer({
+  currentUser,
+  targetUser,
+  roomId,
+  readOnly = false,
+  messages,
+  setMessages,
+  loadMoreOlder,
+  hasMore,
+  loading = false,
+  loadingMore = false,
+  onBack,
+}: ChatContainerProps) {
+  useHeartbeat();
   const scrollViewportRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const isUserAtBottomRef = useRef(true);
   const prevMessagesLengthRef = useRef(0);
+  const lastMessageIdRef = useRef<string | null>(null);
+  const observedUserId = currentUser.isAdmin ? targetUser._id : currentUser._id;
 
-  const seenCalledForRoomRef = useRef<string | null>(null);
-  const lastSeenMessageIdRef = useRef<string | null>(null);
+  const lastMessage = messages[messages.length - 1];
+  const isMessageFromOther = lastMessage && lastMessage.userId !== currentUser._id;
+  const alreadySeenByMe = lastMessage?.seenBy?.includes(currentUser._id);
+  const lastMessageId = messages[messages.length - 1]?._id;
+  const hasMarkedSeenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!roomId) return;
+    const pusher = getPusherClient();
+    const channel = pusher.subscribe(`chat-${roomId}`);
 
-  const checkIfAtBottom = useCallback(() => {
-    if (!scrollViewportRef.current) return true;
-    const { scrollTop, scrollHeight, clientHeight } = scrollViewportRef.current;
-    return scrollHeight - scrollTop - clientHeight < 100;
-  }, []);
+    const handleMessagesSeen = ({ userId }: { userId: string }) => {
+      // Cập nhật seenBy cho tất cả tin nhắn chưa có userId này
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.userId !== userId && !msg.seenBy?.includes(userId)
+            ? { ...msg, seenBy: [...(msg.seenBy || []), userId] }
+            : msg,
+        ),
+      );
+    };
 
-  const scrollToBottom = useCallback(() => {
+    channel.bind("messages-seen", handleMessagesSeen);
+    return () => {
+      channel.unbind("messages-seen", handleMessagesSeen);
+      pusher.unsubscribe(`chat-${roomId}`);
+    };
+  }, [roomId, setMessages]);
+
+  useEffect(() => {
+    if (!lastMessageId) return;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg) return;
+
+    const isFromOther = lastMsg.userId !== currentUser._id;
+    const alreadySeen = lastMsg.seenBy?.includes(currentUser._id);
+    const shouldMark = isFromOther && !alreadySeen && !currentUser.isAdmin;
+
+    // Nếu không cần mark, hoặc đã mark tin nhắn này rồi thì thoát
+    if (!shouldMark || hasMarkedSeenRef.current === lastMsg._id) return;
+
+    hasMarkedSeenRef.current = lastMsg._id;
+
+    const markAsSeen = async () => {
+      try {
+        await fetch(`/api/messages/seen`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomId, messageId: lastMsg._id }),
+        });
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg._id === lastMsg._id ? { ...msg, seenBy: [...(msg.seenBy || []), currentUser._id] } : msg,
+          ),
+        );
+      } catch (error) {
+        console.error("Failed to mark as seen", error);
+      }
+    };
+
+    markAsSeen();
+  }, [lastMessageId, currentUser._id, currentUser.isAdmin, roomId, setMessages, messages]);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (!scrollViewportRef.current) return;
     scrollViewportRef.current.scrollTo({
       top: scrollViewportRef.current.scrollHeight,
-      behavior: "smooth",
+      behavior,
     });
   }, []);
 
-  const callSeenApi = useCallback(() => {
-    if (readOnly || !user?._id || !roomId) return;
+  const handleLoadMore = async () => {
+    if (!scrollViewportRef.current || loadingMore) return;
+    const container = scrollViewportRef.current;
+    const oldScrollHeight = container.scrollHeight;
+    const oldScrollTop = container.scrollTop;
 
-    const ids = roomId.split("-");
-    if (!ids.includes(user._id)) return;
+    await loadMoreOlder();
 
-    fetch("/api/messages/seen", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomId }),
-      credentials: "include",
-    }).catch();
-  }, [user, roomId, readOnly]);
-
-  // track scroll position
-  useEffect(() => {
-    const viewport = scrollViewportRef.current;
-    if (!viewport) return;
-
-    const handleScroll = () => {
-      isUserAtBottomRef.current = checkIfAtBottom();
-    };
-
-    viewport.addEventListener("scroll", handleScroll);
-    return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [checkIfAtBottom]);
-
-  // ✅ auto scroll dùng safeMessages
-  useEffect(() => {
-    if (loading) return;
-
-    if (prevMessagesLengthRef.current === 0 && safeMessages.length > 0) {
-      scrollToBottom();
-    } else if (safeMessages.length > prevMessagesLengthRef.current && isUserAtBottomRef.current) {
-      scrollToBottom();
-    }
-
-    prevMessagesLengthRef.current = safeMessages.length;
-  }, [safeMessages, loading, scrollToBottom]);
-
-  // seen lần đầu vào room
-  useEffect(() => {
-    if (readOnly || !roomId || !user?._id) return;
-    if (seenCalledForRoomRef.current === roomId) return;
-
-    seenCalledForRoomRef.current = roomId;
-    callSeenApi();
-  }, [roomId, user, readOnly, callSeenApi]);
-
-  // ✅ seen theo message hợp lệ
-  useEffect(() => {
-    if (readOnly || !roomId || !user?._id || safeMessages.length === 0) return;
-
-    const lastMsg = safeMessages[safeMessages.length - 1];
-    if (!lastMsg) return;
-
-    if (String(lastMsg.userId) !== String(user._id)) {
-      if (lastSeenMessageIdRef.current !== lastMsg._id) {
-        lastSeenMessageIdRef.current = lastMsg._id;
-        callSeenApi();
+    setTimeout(() => {
+      if (container) {
+        const newScrollHeight = container.scrollHeight;
+        container.scrollTop = oldScrollTop + (newScrollHeight - oldScrollHeight);
       }
-    }
-  }, [safeMessages, roomId, user, readOnly, callSeenApi]);
-
-  const handleLoadMore = () => {
-    if (!hasMore || loadingMore) return;
-    loadMoreOlder();
+    }, 0);
   };
 
-  if (!user || !user._id) {
-    return <div className="flex-1 bg-background" />;
-  }
+  const handleScroll = useCallback(() => {
+    if (!scrollViewportRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollViewportRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 200;
+    isUserAtBottomRef.current = isAtBottom;
+    setShowScrollButton(!isAtBottom);
+  }, []);
+
+  useEffect(() => {
+    if (loading || messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    const isNewMessage = lastMsg?._id !== lastMessageIdRef.current;
+
+    if (
+      prevMessagesLengthRef.current === 0 ||
+      (isNewMessage && (isUserAtBottomRef.current || lastMsg?.userId === currentUser._id))
+    ) {
+      const behavior = prevMessagesLengthRef.current === 0 ? "auto" : "smooth";
+      const timer = setTimeout(() => scrollToBottom(behavior), 50);
+      lastMessageIdRef.current = lastMsg?._id;
+      prevMessagesLengthRef.current = messages.length;
+      return () => clearTimeout(timer);
+    }
+    lastMessageIdRef.current = lastMsg?._id;
+    prevMessagesLengthRef.current = messages.length;
+  }, [messages, loading, currentUser._id, scrollToBottom]);
 
   return (
-    <div className="flex flex-col h-full bg-background overflow-hidden relative">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,var(--primary),transparent_15%)] opacity-[0.03] pointer-events-none" />
+    <div className="flex flex-col h-full bg-background relative">
+      {/* HEADER */}
+      <header className="h-14 md:h-16 shrink-0 px-4 flex items-center justify-between border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-30">
+        <div className="flex items-center gap-3 min-w-0">
+          {onBack && (
+            <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 h-9 w-9">
+              <ChevronLeft className="w-5 h-5" />
+            </Button>
+          )}
+          <div className="h-9 w-9 rounded-full bg-muted border border-border flex items-center justify-center font-bold text-xs shrink-0">
+            {targetUser?.username[0].toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold truncate leading-none">{targetUser?.username}</h3>
+            <div className="flex items-center gap-1.5 mt-1"></div>
+          </div>
+        </div>
+      </header>
 
-      {/* Message viewport */}
-      <div ref={scrollViewportRef} className={cn("flex-1 overflow-auto w-full pt-4", "custom-scrollbar")}>
-        <div className="w-full flex flex-col min-h-full">
+      {/* MESSAGES VIEWPORT */}
+      <div
+        ref={scrollViewportRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto w-full px-4 md:px-6 scroll-smooth">
+        <div className="flex flex-col min-h-full py-6">
           {hasMore && (
-            <div className="flex justify-center py-4 animate-in fade-in slide-in-from-top-2">
+            <div className="flex justify-center mb-6">
               <Button
-                variant="secondary"
+                variant="outline"
                 size="sm"
                 onClick={handleLoadMore}
                 disabled={loadingMore}
-                className="gap-2 text-[11px] font-semibold h-8 rounded-full shadow-sm border border-border/50">
-                {loadingMore ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUp className="w-3.5 h-3.5" />}
-                {loadingMore ? "Đang tải dữ liệu..." : "Tải tin nhắn cũ hơn"}
+                className="h-7 rounded-full text-[10px] font-bold uppercase tracking-widest px-4 border-border/50 bg-muted/10">
+                {loadingMore ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <History className="w-3 h-3 mr-2" />}
+                {loadingMore ? "Syncing" : "Load older"}
               </Button>
             </div>
           )}
 
-          <div className="flex-1 px-4 pb-6 space-y-1">
-            {loading ? (
-              <div className="flex items-center justify-center h-40">
-                <Loader2 className="w-8 h-8 animate-spin text-primary/30" />
+          <div className="space-y-4">
+            {loading && messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[40vh] text-muted-foreground/20">
+                <Loader2 className="w-6 h-6 animate-spin mb-2" />
               </div>
             ) : (
-              safeMessages.map((msg) => (
+              messages.map((msg) => (
                 <MessageItem
                   key={msg._id}
                   message={msg}
-                  isMe={msg.userId === user._id}
-                  currentUser={user}
+                  isMe={msg.userId === observedUserId}
+                  currentUser={currentUser}
                   setMessages={setMessages}
                 />
               ))
@@ -157,9 +217,23 @@ export default function ChatContainer({ user, roomId, readOnly = false }: ChatCo
         </div>
       </div>
 
+      {/* SCROLL TO BOTTOM BUTTON */}
+      {showScrollButton && (
+        <Button
+          size="icon"
+          variant="secondary"
+          onClick={() => scrollToBottom()}
+          className="absolute bottom-24 right-6 h-8 w-8 rounded-full shadow-md border border-border animate-in fade-in slide-in-from-bottom-2">
+          <ChevronDown className="w-4 h-4" />
+        </Button>
+      )}
+
+      {/* INPUT AREA */}
       {!readOnly && (
-        <div className="shrink-0 animate-in slide-in-from-bottom-4 duration-300">
-          <ChatInput roomId={roomId} />
+        <div className="p-4 border-t border-border bg-background safe-bottom">
+          <div className="mx-auto">
+            <ChatInput roomId={roomId} />
+          </div>
         </div>
       )}
     </div>

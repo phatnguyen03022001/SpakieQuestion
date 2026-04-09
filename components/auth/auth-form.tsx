@@ -1,195 +1,115 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, User, Lock, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Loader2, ArrowRight, User, LockKeyhole } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
+import { toast } from "sonner";
 
-export default function AuthForm({ onAuth }: { onAuth: (user: any) => void }) {
-  const [isLogin, setIsLogin] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    username: "",
-    password: "",
-    confirmPassword: "",
-  });
+export default function AuthForm({ isRegister = false }) {
+  const { login, register, loading: authLoading } = useAuth();
+  const [isLogin, setIsLogin] = useState(!isRegister);
+  const [formData, setFormData] = useState({ username: "", password: "", confirmPassword: "" });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const isPasswordMatch = useMemo(() => isLogin || formData.password === formData.confirmPassword, [formData, isLogin]);
 
-  // Logic kiểm tra mật khẩu khớp (UX real-time)
-  const isPasswordMatch = useMemo(() => {
-    if (isLogin) return true;
-    if (!formData.confirmPassword) return true;
-    return formData.password === formData.confirmPassword;
-  }, [formData.password, formData.confirmPassword, isLogin]);
-
-  const submit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isLogin && !isPasswordMatch) return;
 
-    setLoading(true);
+    if (!formData.username || !formData.password) {
+      return toast.error("Vui lòng nhập đầy đủ thông tin");
+    }
+
     try {
-      const res = await fetch(`/api/${isLogin ? "login" : "register"}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        // Logic quan trọng: Kiểm tra quyền Admin ngay tại đây
-        if (data.user.isAdmin) {
-          // Bạn có thể thông báo nhẹ hoặc chuyển hướng thẳng
-          onAuth(data.user);
-        } else {
-          onAuth(data.user);
-        }
+      if (isLogin) {
+        await login(formData.username, formData.password);
+        toast.success("Đăng nhập thành công");
       } else {
-        alert(data.error || "Có lỗi xảy ra");
+        await register(formData.username, formData.password, formData.confirmPassword);
+        toast.success("Tạo tài khoản thành công");
       }
-    } catch (error) {
-      alert("Lỗi kết nối server");
-    } finally {
-      setLoading(false);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message ?? "Thao tác thất bại");
     }
   };
 
   return (
-    <div className="flex items-center justify-center py-10 w-full animate-in fade-in duration-700">
-      <Card className="w-full max-w-100 border-border/50 bg-card/80 backdrop-blur-xl shadow-2xl shadow-primary/5 rounded-[2rem] overflow-hidden">
-        {/* Header với Gradient mờ */}
-        <CardHeader className="space-y-2 text-center pt-8 pb-4 relative">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-linear-to-r from-transparent via-primary to-transparent opacity-50" />
+    <div className="w-full space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="username">Tên đăng nhập</Label>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              id="username"
+              placeholder="username"
+              className="pl-10 h-11 bg-muted/20 border-border/50 focus:bg-background transition-all"
+              value={formData.username}
+              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+            />
+          </div>
+        </div>
 
-          <CardTitle className="text-3xl font-black tracking-tight uppercase">
-            {isLogin ? "Welcome Back" : "Create Account"}
-          </CardTitle>
-          <CardDescription className="text-[11px] uppercase tracking-[0.2em] font-bold text-muted-foreground/60">
-            {isLogin ? "Truy cập hệ thống kết nối" : "Bắt đầu hành trình mới của bạn"}
-          </CardDescription>
-        </CardHeader>
+        <div className="space-y-2">
+          <Label htmlFor="password">Mật khẩu</Label>
+          <div className="relative">
+            <LockKeyhole className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              id="password"
+              type="password"
+              className="pl-10 h-11 bg-muted/20 border-border/50 focus:bg-background transition-all"
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            />
+          </div>
+        </div>
 
-        <CardContent className="px-8 pb-10">
-          <form onSubmit={submit} className="space-y-5">
-            {/* Input Tên đăng nhập */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase ml-1 text-muted-foreground">Username</label>
-              <div className="relative group">
-                <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                <Input
-                  name="username"
-                  placeholder="Tên của bạn..."
-                  value={formData.username}
-                  onChange={handleChange}
-                  className="pl-10 h-11 bg-muted/40 border-border/50 rounded-xl focus-visible:ring-primary/30 focus-visible:bg-background transition-all"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Input Mật khẩu */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase ml-1 text-muted-foreground">Password</label>
-              <div className="relative group">
-                <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                <Input
-                  name="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={formData.password}
-                  onChange={handleChange}
-                  className="pl-10 h-11 bg-muted/40 border-border/50 rounded-xl focus-visible:ring-primary/30 focus-visible:bg-background transition-all"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Confirm Password (Chỉ hiện khi Đăng ký) */}
-            {!isLogin && (
-              <div className="space-y-1.5 animate-in slide-in-from-top-4 duration-500">
-                <label className="text-[10px] font-bold uppercase ml-1 text-muted-foreground">Confirm Password</label>
-                <div className="relative group">
-                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                  <Input
-                    name="confirmPassword"
-                    type="password"
-                    placeholder="••••••••"
-                    value={formData.confirmPassword}
-                    onChange={handleChange}
-                    className={cn(
-                      "pl-10 h-11 bg-muted/40 border-border/50 rounded-xl transition-all",
-                      !isPasswordMatch
-                        ? "border-destructive/50 focus-visible:ring-destructive/30"
-                        : "focus-visible:ring-primary/30",
-                    )}
-                    required
-                  />
-                  {formData.confirmPassword && (
-                    <div className="absolute right-3 top-3.5">
-                      {isPasswordMatch ? (
-                        <CheckCircle2 className="w-4 h-4 text-success" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 text-destructive" />
-                      )}
-                    </div>
-                  )}
-                </div>
-                {!isPasswordMatch && (
-                  <p className="text-[10px] text-destructive font-bold ml-1 uppercase tracking-wider">
-                    Mật khẩu không khớp
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Submit Button */}
-            <Button
-              type="submit"
+        {!isLogin && (
+          <div className="space-y-2 animate-in fade-in zoom-in-95">
+            <Label htmlFor="confirmPassword">Xác nhận mật khẩu</Label>
+            <Input
+              id="confirmPassword"
+              type="password"
               className={cn(
-                "w-full h-11 font-bold uppercase tracking-widest transition-all rounded-xl shadow-lg",
-                isLogin
-                  ? "bg-primary text-primary-foreground shadow-primary/20 hover:shadow-primary/40"
-                  : "bg-foreground text-background",
+                "h-11 bg-muted/20 border-border/50 focus:bg-background transition-all",
+                !isPasswordMatch && formData.confirmPassword && "border-destructive ring-destructive/20",
               )}
-              disabled={loading || (!isLogin && !isPasswordMatch)}>
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <span className="flex items-center gap-2">
-                  {isLogin ? "Sign In" : "Register"}
-                  <ArrowRight className="h-4 w-4" />
-                </span>
-              )}
-            </Button>
+              value={formData.confirmPassword}
+              onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+            />
+          </div>
+        )}
 
-            {/* Divider */}
-            <div className="relative py-2">
-              <div className="absolute inset-0 flex items-center px-2">
-                <span className="w-full border-t border-border/50" />
-              </div>
-              <div className="relative flex justify-center text-[10px] font-black uppercase">
-                <span className="bg-card px-3 text-muted-foreground/40">OR</span>
-              </div>
-            </div>
+        <Button type="submit" disabled={authLoading || !isPasswordMatch} className="w-full h-11 mt-2 shadow-sm">
+          {authLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <>
+              {isLogin ? "Đăng nhập" : "Tạo tài khoản"}
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </>
+          )}
+        </Button>
+      </form>
 
-            {/* Toggle Mode */}
-            <p className="text-center text-xs text-muted-foreground font-medium">
-              {isLogin ? "Bạn là người mới?" : "Đã có tài khoản?"}{" "}
-              <button
-                type="button"
-                onClick={() => setIsLogin(!isLogin)}
-                className="font-black text-primary hover:text-primary/80 transition-colors uppercase ml-1 underline-offset-4 hover:underline">
-                {isLogin ? "Tạo tài khoản ngay" : "Đăng nhập tại đây"}
-              </button>
-            </p>
-          </form>
-        </CardContent>
-      </Card>
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t border-border" />
+        </div>
+        <div className="relative flex justify-center text-[10px] uppercase tracking-widest font-bold">
+          <span className="bg-background px-2 text-muted-foreground">Hoặc</span>
+        </div>
+      </div>
+
+      <Button
+        variant="ghost"
+        className="w-full h-11 text-xs font-semibold hover:bg-muted"
+        onClick={() => setIsLogin(!isLogin)}>
+        {isLogin ? "Bạn chưa có tài khoản? Đăng ký ngay" : "Đã có tài khoản? Đăng nhập"}
+      </Button>
     </div>
   );
 }
